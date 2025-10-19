@@ -15,6 +15,8 @@ app.use(helmet());
 app.use(cors());
 // Middleware to parse incoming JSON data
 app.use(express.json());
+// route connection 
+app.use('/api/auth', require('./routes/auth.routes'));
 
 // --- Database Connection ---
 const MONGO_URI = process.env.MONGO_URI;
