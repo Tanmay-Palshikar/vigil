@@ -1,0 +1,21 @@
+    # ------------------
+    # GENERAL
+    # ------------------
+    .DS_Store
+    .env
+    .env.local
+    npm-debug.log*
+
+    # ------------------
+    # BACKEND (Server)
+    # ------------------
+    /server/node_modules
+    /server/package-lock.json
+
+    # ------------------
+    # FRONTEND (Client)
+    # ------------------
+    /client/dist
+    /client/node_modules
+    /client/package-lock.json
+    
