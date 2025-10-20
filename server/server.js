@@ -15,8 +15,22 @@ app.use(helmet());
 app.use(cors());
 // Middleware to parse incoming JSON data
 app.use(express.json());
-// route connection 
-app.use('/api/auth', require('./routes/auth.routes'));
+// route connections 
+app.use('/api/auth', require('./routes/auth.routes.js'));
+app.use('/api/scan', require('./routes/scan.routes.js'));
+app.use('/api', require('./routes/incidents.routes.js'));
+const clientProfileRoutes = require('./routes/clientProfile.routes.js');
+app.use('/api', clientProfileRoutes);
+app.use('/api/scan', require('./routes/scan.routes.js'));
+
+
+// simple health check
+app.get('/health', (_req, res) => res.json({ 
+  ok: true, 
+  timestamp: new Date().toISOString(),
+  uptime: process.uptime()
+}));
+
 
 // --- Database Connection ---
 const MONGO_URI = process.env.MONGO_URI;
