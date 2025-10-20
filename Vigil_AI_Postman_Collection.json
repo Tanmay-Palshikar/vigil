@@ -1,0 +1,189 @@
+{
+  "info": {
+    "name": "Vigil.ai Risk Analysis API",
+    "description": "Complete API collection for testing the Vigil.ai risk analysis system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5001",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "your-jwt-token-here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Root Endpoint",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/",
+          "host": ["{{base_url}}"],
+          "path": [""]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Start Risk Analysis Scan",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}",
+            "type": "text"
+          },
+          {
+            "key": "x-ai-provider",
+            "value": "gemini",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/scan/start",
+          "host": ["{{base_url}}"],
+          "path": ["api", "scan", "start"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get All Incidents",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/incidents",
+          "host": ["{{base_url}}"],
+          "path": ["api", "incidents"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Incidents with Filters",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/incidents?riskCategory=Security&riskLevel=High&page=1&limit=10",
+          "host": ["{{base_url}}"],
+          "path": ["api", "incidents"],
+          "query": [
+            {
+              "key": "riskCategory",
+              "value": "Security"
+            },
+            {
+              "key": "riskLevel",
+              "value": "High"
+            },
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Risk Statistics",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/incidents/stats/summary",
+          "host": ["{{base_url}}"],
+          "path": ["api", "incidents", "stats", "summary"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Specific Incident",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/incidents/{{incident_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "incidents", "{{incident_id}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Scan History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/scan/history",
+          "host": ["{{base_url}}"],
+          "path": ["api", "scan", "history"]
+        }
+      },
+      "response": []
+    }
+  ]
+}
