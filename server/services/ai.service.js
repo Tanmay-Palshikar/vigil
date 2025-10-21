@@ -1,100 +1,127 @@
-const analyze = async (textContent, clientContext) => {
-  // This is the hardcoded response that will be used as a fallback if the live API fails.
-  const fallbackResponse = {
-    isRisk: true,
-    riskCategory: "Reputational",
-    riskLevel: "High",
-    justification: "[FALLBACK] A simulated analysis indicates a potential reputational risk based on a negative news article concerning the company's recent activities.",
-    mitigationStrategy: "[FALLBACK] It is recommended to prepare a public relations statement and monitor social media for related sentiment."
-  };
+// server/services/ai.service.js
 
-  // --- Live API Call with Automatic Fallback Logic ---
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error('FATAL ERROR: GEMINI_API_KEY is not defined in the .env file.');
-      throw new Error('GEMINI_API_KEY is not defined.');
-    }
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const axios = require('axios');
+const { validateAndNormalizeAiResponse } = require('../utils/ai.validator');
+const openAiService = require('./openai.service');
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-    const systemInstruction = `You are an expert digital risk analyst specializing in the ${clientContext.clientIndustry} sector. Analyze the following text for risks. Your response MUST strictly adhere to the provided JSON schema. When generating the mitigationStrategy, it must be actionable, concise, and specifically consider the regulations listed here: ${clientContext.monitoredComplianceRegs}.`;
-
-    const payload = {
-      contents: [{ parts: [{ text: textContent }] }],
-      systemInstruction: {
-        parts: [{ text: systemInstruction }]
-      },
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            isRisk: { "type": "BOOLEAN" },
-            riskCategory: { "type": "STRING", "enum": ["Reputational", "Security", "Compliance", "None"] },
-            riskLevel: { "type": "STRING", "enum": ["High", "Medium", "Low", "None"] },
-            justification: { "type": "STRING" },
-            mitigationStrategy: { "type": "STRING" }
-          }
-        }
-      }
-    };
-
-    const maxRetries = 7;
-    let lastError = null;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (response.status === 503) {
-          const delay = Math.pow(2, attempt) * 1000;
-          console.warn(`Gemini API is overloaded. Retrying in ${delay / 1000} seconds... (Attempt ${attempt + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          lastError = new Error(`Gemini API request failed with status 503 (Service Unavailable)`);
-          continue;
-        }
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          console.error("Gemini API Error Response:", errorBody);
-          throw new Error(`Gemini API request failed with status ${response.status}`);
-        }
-
-        const result = await response.json();
-        const aiResponseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (!aiResponseText) {
-          throw new Error('Invalid or empty response structure from Gemini API.');
-        }
-
-        // If the live API call is successful, return the result.
-        return JSON.parse(aiResponseText);
-
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxRetries - 1) {
-            const delay = Math.pow(2, attempt) * 1000;
-            console.warn(`An error occurred. Retrying in ${delay / 1000} seconds...`, error.message);
-            await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-    
-    // If all retries fail, throw the last recorded error to be caught by the outer block.
-    throw lastError;
-
-  } catch (finalError) {
-    // --- AUTOMATIC FALLBACK ACTIVATED ---
-    console.error('Gemini API call failed after all retries. Activating fallback response.', finalError.message);
-    // Instead of failing, we return the high-quality mock response.
-    return fallbackResponse;
-  }
+// LLM Output Schema (Matches Mongoose Model)
+const RiskIncidentSchemaObject = {
+    type: "object",
+    properties: {
+        isRisk: { type: "boolean" },
+        riskCategory: { type: "string", enum: ["Reputational", "Security", "Compliance", "None"] },
+        riskLevel: { type: "string", enum: ["High", "Medium", "Low", "None"] },
+        justification: { type: "string" },
+        mitigationStrategy: { type: "string" },
+        sourceUrl: { type: "string" }
+    },
+    required: ["isRisk", "riskCategory", "riskLevel", "justification", "mitigationStrategy", "sourceUrl"]
 };
 
-module.exports = { analyze };
+/**
+ * Creates the base configuration for any analysis call.
+ */
+const generateAnalysisConfig = (clientContext) => {
+    const systemInstruction = `You are an expert digital risk analyst for ${clientContext.clientName}. Your response MUST be ONLY a single, valid, minified JSON object adhering strictly to the provided schema. Do NOT include any text before or after the JSON.`;
+
+    return {
+        systemInstruction,
+        generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+            responseSchema: RiskIncidentSchemaObject,
+        },
+        tools: [{ googleSearch: {} }] // Google Search is always enabled for this service now
+    };
+};
+
+/**
+ * Primary orchestration: Attempts Gemini (5 retries), then switches to OpenAI.
+ */
+const analyzeWithFailover = async (prompt, clientContext) => {
+    const maxGeminiRetries = 5;
+    let lastError = null;
+
+    console.log(`[AI Failover] Starting Gemini analysis (Max ${maxGeminiRetries} retries)...`);
+    
+    for (let attempt = 0; attempt < maxGeminiRetries; attempt++) {
+        try {
+            const config = generateAnalysisConfig(clientContext);
+            const model = genAI.getGenerativeModel({
+                model: "gemini-2.0-flash-exp",
+                ...config
+            });
+
+            const result = await model.generateContent(prompt);
+            const response = result.response;
+            const aiResponseText = response.text().trim();
+
+            if (!aiResponseText || !aiResponseText.startsWith('{') || !aiResponseText.endsWith('}')) {
+                throw new Error(`Gemini: Response is not valid JSON. Content: "${aiResponseText?.substring(0, 80)}..."`);
+            }
+
+            console.log(`[AI Failover] Gemini analysis succeeded on attempt ${attempt + 1}.`);
+            return JSON.parse(aiResponseText);
+
+        } catch (error) {
+            lastError = error;
+            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+            console.warn(`[Gemini Error] Attempt ${attempt + 1}/${maxGeminiRetries} failed. Retrying in ${(delay / 1000).toFixed(1)}s...`, error.message);
+            
+            if (attempt < maxGeminiRetries - 1) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    console.error(`[AI Failover] Gemini failed after ${maxGeminiRetries} retries. Switching to OpenAI API...`, lastError?.message);
+
+    try {
+        const openAiResult = await openAiService.analyze(prompt, RiskIncidentSchemaObject, clientContext);
+        console.log('[AI Failover] OpenAI analysis succeeded.');
+        return openAiResult;
+    } catch (openAiError) {
+        console.error('CRITICAL FAILURE: OpenAI also failed.', openAiError.message);
+        throw new Error(`AI System Unavailable. Both Gemini and OpenAI failed: ${openAiError.message}`);
+    }
+};
+
+/**
+ * Handles execution, parsing, and validation of LLM output.
+ */
+const processAndValidateAnalysis = async (prompt, clientContext) => {
+    const rawResults = await analyzeWithFailover(prompt, clientContext);
+    const resultsArray = Array.isArray(rawResults) ? rawResults : [rawResults];
+    return resultsArray.map(validateAndNormalizeAiResponse).filter(result => result !== null);
+};
+
+// --- EXPORTED FUNCTION FOR SCAN CONTROLLER ---
+
+/**
+ * @function discoverRisks
+ * Uses Gemini Google Search to find new risks, with an optional site constraint.
+ * @param {string} companyName - The company to search for.
+ * @param {object} clientContext - Context for the AI prompt.
+ * @param {string|null} searchSite - An optional domain to limit the search to (e.g., 'indiatoday.in').
+ */
+exports.discoverRisks = async (companyName, clientContext, searchSite = null) => {
+    // Construct the search query with the site constraint if it exists
+    let searchQuery = `recent negative news about "${companyName}"`;
+    if (searchSite) {
+        searchQuery += ` site:${searchSite}`;
+    }
+
+    const prompt = `Using the search tool, find up to 3 relevant articles matching the query "${searchQuery}". For each relevant article found, analyze its content and extract any key risk details into the JSON schema defined.`;
+
+    try {
+        // The 'useGoogleSearch' flag is no longer needed as the tool is always on for this service
+        return await processAndValidateAnalysis(prompt, clientContext);
+    } catch (aiError) {
+         console.error(`[discoverRisks] AI pipeline failed for ${companyName} at site ${searchSite || 'any'}:`, aiError.message);
+         return [];
+    }
+};
 
