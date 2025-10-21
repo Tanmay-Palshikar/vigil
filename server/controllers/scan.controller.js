@@ -1,121 +1,177 @@
-// Import all necessary components: Models, Services, and Utilities
 const ClientProfile = require('../models/clientProfile.model.js');
 const RiskIncident = require('../models/riskIncident.model.js');
-const { analyzeWithFailover } = require('../services/aiRouter.service.js');
-const { scrapeUrl } = require('../services/scraping.service.js');
-const { checkSslExpiration } = require('../services/ssl.service.js');
+// The only AI service function we need now is discoverRisks
+const { discoverRisks } = require('../services/ai.service.js');
 const { validateAndNormalizeAiResponse } = require('../utils/ai.validator.js');
+const { checkSslExpiration } = require('../services/ssl.service.js');
 
 class ScanController {
-  /**
-   * Orchestrates the entire scanning process for a user's monitored URLs.
-   * It now uses the AI Router for resilient analysis.
-   */
-  async startScan(req, res) {
-    try {
-      const userId = req.user.id;
-      console.log(`[ScanController] Scan initiated for user: ${userId}`);
+    /**
+     * @route POST api/scan/start
+     * @desc Orchestrates the Client-Guided Intelligent Scan.
+     */
+    initiateScan = async (req, res) => {
+        const { companyName, primaryWebsiteUrl, trustedUrls } = req.body;
+        const userId = req.user.id;
 
-      // 1. Get the user's profile
-      const clientProfile = await ClientProfile.findOne({ user: userId });
-      if (!clientProfile || !clientProfile.monitoredUrls || clientProfile.monitoredUrls.length === 0) {
-        return res.status(400).json({ status: 'error', message: 'Client profile not found or no URLs to monitor.' });
-      }
+        console.log(`[ScanController] Intelligent Scan initiated for user: ${userId} on ${companyName}`);
 
-      const createdIncidents = [];
-      const errors = [];
-      const clientContext = {
-        clientIndustry: clientProfile.clientIndustry,
-        monitoredComplianceRegs: clientProfile.monitoredComplianceRegs || [],
-      };
-
-      // Process each URL for both text and SSL risks in parallel for efficiency
-      const scanPromises = clientProfile.monitoredUrls.map(async (url) => {
-        // --- Scan 1: Text-Based Risk Analysis ---
         try {
-          console.log(`[ScanController] Starting text scan for ${url}`);
-          const textContent = await scrapeUrl(url);
-          if (textContent) {
-            const analysisResult = await analyzeWithFailover(textContent, clientContext);
-            const validatedResult = validateAndNormalizeAiResponse(analysisResult);
-            if (validatedResult.isRisk) {
-              const incident = new RiskIncident({
-                clientProfile: clientProfile._id,
-                sourceUrl: url,
-                scrapedContentSnippet: textContent.substring(0, 1000),
-                aiAnalysis: validatedResult,
-              });
-              const savedIncident = await incident.save();
-              createdIncidents.push(savedIncident._id);
+            const clientProfile = await ClientProfile.findOne({ user: userId });
+            if (!clientProfile) {
+                return res.status(404).json({ status: 'error', message: 'Client profile not found.' });
             }
-          }
-        } catch (error) {
-          console.error(`Error processing text scan for URL ${url}:`, error.message);
-          errors.push({ url, type: 'Text Scan', error: error.message });
-        }
 
-        // --- Scan 2: SSL Expiration Risk Analysis ---
+            const createdIncidents = [];
+            const errors = [];
+            const clientContext = {
+                clientName: companyName,
+                clientIndustry: clientProfile.clientIndustry,
+                monitoredComplianceRegs: clientProfile.monitoredComplianceRegs || [],
+            };
+
+            const scanPromises = [];
+
+            // 1. SSL Check on the Primary Website URL
+            console.log(`[ScanController] Starting SSL check on primary site: ${primaryWebsiteUrl}`);
+            scanPromises.push(this._processSslChecks([primaryWebsiteUrl], clientProfile._id, errors));
+
+            // --- REWRITTEN LOGIC FOR TRUSTED URLS ---
+            // 2. Loop through each trusted site and perform a targeted search
+            if (trustedUrls && trustedUrls.length > 0) {
+                console.log(`[ScanController] Starting targeted search on ${trustedUrls.length} trusted sites...`);
+                for (const siteUrl of trustedUrls) {
+                    try {
+                        const domain = new URL(siteUrl).hostname.replace('www.', ''); // Extract domain for the search
+                        // Call discoverRisks with the site constraint
+                        scanPromises.push(this._processAiAnalysis(companyName, clientContext, clientProfile._id, domain, errors));
+                    } catch (urlError) {
+                        console.error(`Invalid URL in trustedUrls: ${siteUrl}`);
+                        errors.push({ url: siteUrl, type: 'URL Parsing', error: 'Invalid URL format.' });
+                    }
+                }
+            }
+
+            // 3. General Risk Discovery Search (searches the entire web)
+            console.log(`[ScanController] Starting general Risk Discovery Search for ${companyName}...`);
+            // Call discoverRisks with null for the search site to search the whole web
+            scanPromises.push(this._processAiAnalysis(companyName, clientContext, clientProfile._id, null, errors));
+
+            const allIncidentArrays = await Promise.all(scanPromises);
+
+            allIncidentArrays.flat().forEach(id => {
+                if (id) createdIncidents.push(id);
+            });
+
+            console.log(`[ScanController] Scan complete. Found ${createdIncidents.length} new incidents.`);
+            return res.status(200).json({
+                status: 'ok',
+                createdCount: createdIncidents.length,
+                incidentIds: createdIncidents,
+                errors,
+            });
+
+        } catch (error) {
+            console.error('Fatal error in initiateScan controller:', error);
+            res.status(500).json({ status: 'error', message: 'An unexpected error occurred during the intelligent scan.' });
+        }
+    }
+
+    /**
+     * Helper function to execute AI analysis and save incidents.
+     */
+    _processAiAnalysis = async (companyName, clientContext, clientProfileId, searchSite, errors) => {
+        const incidentIds = [];
         try {
-          console.log(`[ScanController] Starting SSL scan for ${url}`);
-          const sslResult = await checkSslExpiration(url);
-          if (sslResult.isExpiringSoon) {
-            const sslRiskPrompt = `Analyze the following critical security risk: The SSL certificate for our website (${url}) is expiring in only ${sslResult.daysRemaining} days. This poses a high-priority security risk.`;
-            const analysisResult = await analyzeWithFailover(sslRiskPrompt, clientContext);
-            const validatedResult = validateAndNormalizeAiResponse(analysisResult);
-            if (validatedResult.isRisk) {
-              const incident = new RiskIncident({
-                clientProfile: clientProfile._id,
-                sourceUrl: url,
-                aiAnalysis: validatedResult,
-              });
-              const savedIncident = await incident.save();
-              createdIncidents.push(savedIncident._id);
+            const analysisResults = await discoverRisks(companyName, clientContext, searchSite);
+
+            for (const result of analysisResults) {
+                const validatedResult = validateAndNormalizeAiResponse(result);
+                if (validatedResult && validatedResult.riskLevel !== 'None') {
+                    const incident = new RiskIncident({
+                        clientProfile: clientProfileId,
+                        sourceUrl: validatedResult.sourceUrl,
+                        aiAnalysis: validatedResult,
+                    });
+                    const savedIncident = await incident.save();
+                    incidentIds.push(savedIncident._id);
+                }
             }
-          }
         } catch (error) {
-          console.error(`Error processing SSL scan for URL ${url}:`, error.message);
-          errors.push({ url, type: 'SSL Scan', error: error.message });
+            console.error(`Error in AI processing for site "${searchSite || 'any'}":`, error.message);
+            errors.push({ site: searchSite || 'General Web Search', type: 'AI Analysis', error: error.message });
         }
-      });
-
-      await Promise.all(scanPromises);
-
-      console.log(`[ScanController] Scan complete. Found ${createdIncidents.length} new incidents.`);
-      res.status(200).json({
-        status: 'ok',
-        createdCount: createdIncidents.length,
-        incidentIds: createdIncidents,
-        errors,
-      });
-
-    } catch (error) {
-      console.error('Fatal error in startScan controller:', error);
-      res.status(500).json({ status: 'error', message: 'An unexpected error occurred during the scan.' });
+        return incidentIds;
     }
-  }
 
-  /**
-   * Retrieves the scan history (risk incidents) for the authenticated user.
-   */
-  async getScanHistory(req, res) {
-    try {
-      const userId = req.user.id;
-      const clientProfile = await ClientProfile.findOne({ user: userId });
-
-      if (!clientProfile) {
-        return res.status(404).json({ success: false, message: 'Client profile not found' });
-      }
-
-      const incidents = await RiskIncident.find({ clientProfile: clientProfile._id })
-        .sort({ createdAt: -1 })
-        .limit(parseInt(req.query.limit, 10) || 50);
-
-      res.status(200).json({ success: true, data: incidents });
-    } catch (error) {
-      console.error('Error in getScanHistory:', error);
-      res.status(500).json({ success: false, message: 'Error retrieving scan history' });
+    /**
+     * Helper function to execute SSL checks.
+     */
+    _processSslChecks = async (urls, clientProfileId, errors) => {
+        const incidentIds = [];
+        const sslPromises = urls.map(async (url) => {
+             try {
+                const sslResult = await checkSslExpiration(url);
+                if (sslResult.isExpiringSoon) {
+                    const sslRiskPrompt = `The SSL certificate for the primary website (${url}) is expiring in only ${sslResult.daysRemaining} days.`;
+                    const incident = new RiskIncident({
+                        clientProfile: clientProfileId,
+                        sourceUrl: url,
+                        aiAnalysis: {
+                            isRisk: true,
+                            riskCategory: "Security",
+                            riskLevel: "High",
+                            justification: sslRiskPrompt,
+                            mitigationStrategy: "Renew SSL certificate immediately."
+                        },
+                    });
+                    const savedIncident = await incident.save();
+                    incidentIds.push(savedIncident._id);
+                }
+            } catch (error) {
+                console.error(`Error processing SSL scan for URL ${url}:`, error.message);
+                errors.push({ url, type: 'SSL Scan', error: error.message });
+            }
+        });
+        await Promise.all(sslPromises);
+        return incidentIds;
     }
-  }
+
+    /**
+     * Retrieves the scan history.
+     */
+    getScanHistory = async (req, res) => {
+        try {
+            const clientProfile = await ClientProfile.findOne({ user: req.user.id });
+            if (!clientProfile) {
+                return res.status(404).json({ success: false, message: 'Client profile not found' });
+            }
+            const incidents = await RiskIncident.find({ clientProfile: clientProfile._id })
+                .sort({ createdAt: -1 })
+                .limit(parseInt(req.query.limit, 10) || 50);
+            res.status(200).json({ success: true, data: incidents });
+        } catch (error) {
+            console.error('Error in getScanHistory:', error);
+            res.status(500).json({ success: false, message: 'Error retrieving scan history' });
+        }
+    }
+
+    /**
+     * Checks SSL status for a single URL.
+     */
+    checkSslStatus = async (req, res) => {
+        const { url } = req.body;
+        if (!url) {
+            return res.status(400).json({ error: 'URL is required.' });
+        }
+        try {
+            const sslResult = await checkSslExpiration(url);
+            res.status(200).json(sslResult);
+        } catch (error) {
+            console.error(`Error checking SSL status for ${url}:`, error);
+            res.status(500).json({ error: 'Failed to check SSL status.' });
+        }
+    }
 }
 
 module.exports = new ScanController();

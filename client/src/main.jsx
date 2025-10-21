@@ -1,10 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx' // Changed to App
+import AppWrapper from './App.jsx' // Changed to AppWrapper
 import './index.css' 
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App /> {/* Changed to <App /> */}
+    <AppWrapper /> {/* Changed to <Appwrapper /> */}
   </React.StrictMode>,
 )
