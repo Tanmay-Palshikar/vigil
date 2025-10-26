@@ -18,7 +18,8 @@ const vercelFrontendUrl = 'https://vigil-theta.vercel.app'; // Your Vercel URL
 const allowedOrigins = [
   'http://localhost:3000', // Keep for local development (if you use this port)
   'http://localhost:5173', // Vite default port (if you use this port)
-  vercelFrontendUrl        // Your deployed frontend URL
+  'https://vigil-ai.vercel.app',
+   vercelFrontendUr        // Your deployed frontend URL
 ];
 
 app.use(cors({
