@@ -12,7 +12,28 @@ const app = express();
 // Helmet for basic security headers
 app.use(helmet());
 // CORS to allow requests from your frontend
-app.use(cors());
+// Replace with your actual Vercel URL
+const vercelFrontendUrl = 'https://vigil-theta.vercel.app'; // Your Vercel URL
+
+const allowedOrigins = [
+  'http://localhost:3000', // Keep for local development (if you use this port)
+  'http://localhost:5173', // Vite default port (if you use this port)
+  vercelFrontendUrl        // Your deployed frontend URL
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      console.error(`CORS Error: Origin ${origin} not allowed.`); // Add logging
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true // Important if you handle sessions/cookies
+}));
 // Middleware to parse incoming JSON data
 app.use(express.json());
 // route connections 
