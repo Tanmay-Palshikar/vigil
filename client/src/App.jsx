@@ -6,7 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 // --- API Service ---
 // Configures a central Axios instance for all API calls.
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_BASE_URL || 'https://vigil-ai-backend2.onrender.com', // Ensure this port matches your backend server
+    baseURL:'https://vigil-ai-backend2.onrender.com', // Ensure this port matches your backend server
 });
 
 // Axios interceptor to automatically add the JWT token to every request header.
