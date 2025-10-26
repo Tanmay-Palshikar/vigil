@@ -13,12 +13,14 @@ const app = express();
 app.use(helmet());
 // CORS to allow requests from your frontend
 // Replace with your actual Vercel URL
-const vercelFrontendUrl = 'https://vigil-theta.vercel.app'; // Your Vercel URL
+const vercelFrontendUrl = 'https://vigil-s8vc.vercel.app/'; // Your Vercel URL
 
 const allowedOrigins = [
+  'https://vigil-s8vc.vercel.app/',
+  'https://vigil-s8vc.vercel.app/login'
   'http://localhost:3000', // Keep for local development (if you use this port)
   'http://localhost:5173', // Vite default port (if you use this port)
-  'https://vigil-theta.vercel.app',
+  'https://vigil-s8vc.vercel.app/',
    vercelFrontendUrl        // Your deployed frontend URL
 ];
 
