@@ -30,21 +30,19 @@ class ScanController {
                 monitoredComplianceRegs: clientProfile.monitoredComplianceRegs || [],
             };
 
-            const scanPromises = [];
-
-            // 1. SSL Check on the Primary Website URL
+            // Process sequentially to avoid API rate limits
             console.log(`[ScanController] Starting SSL check on primary site: ${primaryWebsiteUrl}`);
-            scanPromises.push(this._processSslChecks([primaryWebsiteUrl], clientProfile._id, errors));
+            const sslIds = await this._processSslChecks([primaryWebsiteUrl], clientProfile._id, errors);
+            createdIncidents.push(...sslIds);
 
-            // --- REWRITTEN LOGIC FOR TRUSTED URLS ---
-            // 2. Loop through each trusted site and perform a targeted search
+            // 2. Loop through each trusted site and perform a targeted search (sequential)
             if (trustedUrls && trustedUrls.length > 0) {
                 console.log(`[ScanController] Starting targeted search on ${trustedUrls.length} trusted sites...`);
                 for (const siteUrl of trustedUrls) {
                     try {
-                        const domain = new URL(siteUrl).hostname.replace('www.', ''); // Extract domain for the search
-                        // Call discoverRisks with the site constraint
-                        scanPromises.push(this._processAiAnalysis(companyName, clientContext, clientProfile._id, domain, errors));
+                        const domain = new URL(siteUrl).hostname.replace('www.', '');
+                        const ids = await this._processAiAnalysis(companyName, clientContext, clientProfile._id, domain, errors);
+                        createdIncidents.push(...ids);
                     } catch (urlError) {
                         console.error(`Invalid URL in trustedUrls: ${siteUrl}`);
                         errors.push({ url: siteUrl, type: 'URL Parsing', error: 'Invalid URL format.' });
@@ -54,14 +52,8 @@ class ScanController {
 
             // 3. General Risk Discovery Search (searches the entire web)
             console.log(`[ScanController] Starting general Risk Discovery Search for ${companyName}...`);
-            // Call discoverRisks with null for the search site to search the whole web
-            scanPromises.push(this._processAiAnalysis(companyName, clientContext, clientProfile._id, null, errors));
-
-            const allIncidentArrays = await Promise.all(scanPromises);
-
-            allIncidentArrays.flat().forEach(id => {
-                if (id) createdIncidents.push(id);
-            });
+            const generalIds = await this._processAiAnalysis(companyName, clientContext, clientProfile._id, null, errors);
+            createdIncidents.push(...generalIds);
 
             console.log(`[ScanController] Scan complete. Found ${createdIncidents.length} new incidents.`);
             return res.status(200).json({
