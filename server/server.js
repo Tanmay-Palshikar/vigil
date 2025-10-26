@@ -19,7 +19,7 @@ const allowedOrigins = [
   'http://localhost:3000', // Keep for local development (if you use this port)
   'http://localhost:5173', // Vite default port (if you use this port)
   'https://vigil-ai.vercel.app',
-   vercelFrontendUr        // Your deployed frontend URL
+   vercelFrontendUrl        // Your deployed frontend URL
 ];
 
 app.use(cors({
